@@ -71,13 +71,15 @@ public final class IntentEngine: Sendable {
         }
 
         // Concurrency Scenario B & C: Validate non-stale input and context
+        // Passes previewStore to remove consumed proposals immediately as they succeed
         try await commitExecutor.commit(
             proposals: state.proposals,
             currentContext: currentContext,
-            registry: registry
+            registry: registry,
+            previewStore: previewStore
         )
 
-        // Clear preview after successful commit
+        // Clear preview after successful batch commit
         await previewStore.clear()
     }
 

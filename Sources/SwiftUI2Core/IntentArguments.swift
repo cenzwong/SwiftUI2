@@ -29,15 +29,20 @@ public struct IntentArguments: Codable, Sendable, Equatable {
 
     public func bool(for key: String) -> Bool? {
         guard let val = storage[key] else { return nil }
-        return Bool(val)
+        let lower = val.lowercased()
+        if lower == "true" || lower == "1" { return true }
+        if lower == "false" || lower == "0" { return false }
+        return nil
     }
 
     /// Attempts to decode the stored arguments into a strongly-typed `Decodable` struct.
     public func decode<T: Decodable>(_ type: T.Type) throws -> T {
         let jsonMap = storage.mapValues { val -> Any in
+            let lower = val.lowercased()
+            if lower == "true" { return true }
+            if lower == "false" { return false }
             if let i = Int(val) { return i }
             if let d = Double(val) { return d }
-            if let b = Bool(val) { return b }
             return val
         }
         let data = try JSONSerialization.data(withJSONObject: jsonMap)

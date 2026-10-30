@@ -42,7 +42,7 @@ public final class AppleFoundationModelAdapter: IntentModel, @unchecked Sendable
     }
 
     /// Internal response parser converting model JSON or structured text into `[IntentProposal]`.
-    private func parseResponse(_ text: String, context: IntentContext) -> [IntentProposal] {
+    public func parseResponse(_ text: String, context: IntentContext) -> [IntentProposal] {
         // Fallback robust JSON extraction logic for structured proposals
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -56,7 +56,14 @@ public final class AppleFoundationModelAdapter: IntentModel, @unchecked Sendable
             var args = IntentArguments()
             if let params = item["parameters"] as? [String: Any] {
                 for (k, v) in params {
-                    args[k] = "\(v)"
+                    // Handle JSON booleans explicitly (NSNumber CFBoolean check) so they stringify as "true"/"false" instead of "1"/"0"
+                    if let number = v as? NSNumber, CFBooleanGetTypeID() == CFGetTypeID(number) {
+                        args[k] = number.boolValue ? "true" : "false"
+                    } else if let boolVal = v as? Bool {
+                        args[k] = boolVal ? "true" : "false"
+                    } else {
+                        args[k] = "\(v)"
+                    }
                 }
             }
             proposals.append(IntentProposal(

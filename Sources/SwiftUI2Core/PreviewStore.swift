@@ -58,6 +58,17 @@ public actor PreviewStore {
         )
     }
 
+    /// Removes specific proposals by ID (e.g. after successful individual commit execution).
+    public func removeProposals(withIDs ids: Set<UUID>) {
+        let remaining = state.proposals.filter { !ids.contains($0.id) }
+        state = PreviewState(
+            proposals: remaining,
+            inputRevision: state.inputRevision,
+            contextRevision: state.contextRevision,
+            isPending: state.isPending
+        )
+    }
+
     /// Clears active proposals.
     public func clear() {
         state = .empty
