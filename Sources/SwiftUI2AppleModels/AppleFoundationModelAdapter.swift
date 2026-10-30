@@ -56,11 +56,9 @@ public final class AppleFoundationModelAdapter: IntentModel, @unchecked Sendable
             var args = IntentArguments()
             if let params = item["parameters"] as? [String: Any] {
                 for (k, v) in params {
-                    // Handle JSON booleans explicitly (NSNumber CFBoolean check) so they stringify as "true"/"false" instead of "1"/"0"
+                    // Use CFBoolean check alone to distinguish true JSON booleans from NSNumbers representing 0 and 1
                     if let number = v as? NSNumber, CFBooleanGetTypeID() == CFGetTypeID(number) {
                         args[k] = number.boolValue ? "true" : "false"
-                    } else if let boolVal = v as? Bool {
-                        args[k] = boolVal ? "true" : "false"
                     } else {
                         args[k] = "\(v)"
                     }

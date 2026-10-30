@@ -8,6 +8,12 @@ struct SampleBoolParams: Codable, Sendable {
     let isCompleted: Bool
 }
 
+struct SampleNumericParams: Codable, Sendable {
+    let priority: Int
+    let count: Int
+    let ratio: Double
+}
+
 final class BatchAndBooleanTests: XCTestCase {
     func testBatchCommitPreValidationFailurePreventsPartialExecution() async throws {
         let registry = IntentRegistry()
@@ -86,6 +92,44 @@ final class BatchAndBooleanTests: XCTestCase {
         }
     }
 
+    func testCommitPreservesNewerProposalsArrivingDuringAsyncExecution() async throws {
+        let mockModel = MockIntentModel()
+        let engine = IntentEngine(model: mockModel)
+
+        let newProposalID = UUID()
+
+        await engine.register(IntentDefinition(
+            intentID: "intent.slow",
+            summary: "Slow Intent",
+            parameterDescriptors: [],
+            commit: { _, _ in
+                // Simulate slow async commit handler during which user types new input
+                try await Task.sleep(for: .milliseconds(100))
+                // Inject new proposal representing new user command arriving while commit is in-flight
+                let newProposal = IntentProposal(
+                    id: newProposalID,
+                    intentID: "intent.new",
+                    inputRevision: 2,
+                    contextRevision: 1,
+                    arguments: IntentArguments()
+                )
+                await engine.previewStore.updateProposals([newProposal], inputRevision: 2, contextRevision: 1)
+            }
+        ))
+
+        let context = IntentContext(revision: 1)
+        let slowProposal = IntentProposal(intentID: "intent.slow", inputRevision: 1, contextRevision: 1, arguments: IntentArguments())
+        await engine.previewStore.updateProposals([slowProposal], inputRevision: 1, contextRevision: 1)
+
+        // Perform commit of slowProposal
+        try await engine.commit(currentContext: context)
+
+        // Verify that the new proposal (newProposal) injected during commit execution is preserved and NOT deleted
+        let state = await engine.previewStore.state()
+        XCTAssertEqual(state.proposals.count, 1)
+        XCTAssertEqual(state.proposals.first?.id, newProposalID)
+    }
+
     func testJSONBooleanParsingAndTypedDecoding() throws {
         let adapter = AppleFoundationModelAdapter()
         let jsonResponse = """
@@ -113,5 +157,38 @@ final class BatchAndBooleanTests: XCTestCase {
         let decoded = try proposal.arguments.decode(SampleBoolParams.self)
         XCTAssertEqual(decoded.title, "Buy milk")
         XCTAssertEqual(decoded.isCompleted, true)
+    }
+
+    func testJSONNumericZeroAndOneParsingAndTypedDecoding() throws {
+        let adapter = AppleFoundationModelAdapter()
+        let jsonResponse = """
+        {
+          "intents": [
+            {
+              "intentID": "reminder.update",
+              "parameters": {
+                "priority": 0,
+                "count": 1,
+                "ratio": 0.0
+              }
+            }
+          ]
+        }
+        """
+
+        let context = IntentContext(revision: 1)
+        let proposals = adapter.parseResponse(jsonResponse, context: context)
+
+        XCTAssertEqual(proposals.count, 1)
+        let proposal = proposals[0]
+        XCTAssertEqual(proposal.arguments.string(for: "priority"), "0")
+        XCTAssertEqual(proposal.arguments.int(for: "priority"), 0)
+        XCTAssertEqual(proposal.arguments.string(for: "count"), "1")
+        XCTAssertEqual(proposal.arguments.int(for: "count"), 1)
+
+        let decoded = try proposal.arguments.decode(SampleNumericParams.self)
+        XCTAssertEqual(decoded.priority, 0)
+        XCTAssertEqual(decoded.count, 1)
+        XCTAssertEqual(decoded.ratio, 0.0)
     }
 }
