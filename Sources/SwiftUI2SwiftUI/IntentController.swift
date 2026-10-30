@@ -46,10 +46,19 @@ public final class IntentController: ObservableObject {
     /// Explicitly commits current active preview proposals.
     public func commit() async throws {
         let currentContext = contextProvider?() ?? IntentContext.empty
+        let committedInputText = self.inputText
+        let committedProposalIDs = Set(self.proposals.map(\.id))
+
         do {
             try await engine.commit(currentContext: currentContext)
-            self.proposals = []
-            self.inputText = ""
+
+            // Conditionally clear input text only if the user hasn't typed a new command during async commit execution
+            if self.inputText == committedInputText {
+                self.inputText = ""
+            }
+
+            // Remove only the proposals that belonged to the completed commit batch, preserving newer proposals
+            self.proposals.removeAll(where: { committedProposalIDs.contains($0.id) })
             self.errorMessage = nil
         } catch {
             self.errorMessage = error.localizedDescription

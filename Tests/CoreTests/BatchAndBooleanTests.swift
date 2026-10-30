@@ -1,6 +1,7 @@
 import XCTest
 @testable import SwiftUI2Core
 @testable import SwiftUI2AppleModels
+@testable import SwiftUI2SwiftUI
 @testable import SwiftUI2Testing
 
 struct SampleBoolParams: Codable, Sendable {
@@ -12,6 +13,11 @@ struct SampleNumericParams: Codable, Sendable {
     let priority: Int
     let count: Int
     let ratio: Double
+}
+
+struct SampleOptionalParams: Codable, Sendable {
+    let title: String
+    let dueDateExpression: String?
 }
 
 final class BatchAndBooleanTests: XCTestCase {
@@ -128,6 +134,76 @@ final class BatchAndBooleanTests: XCTestCase {
         let state = await engine.previewStore.state()
         XCTAssertEqual(state.proposals.count, 1)
         XCTAssertEqual(state.proposals.first?.id, newProposalID)
+    }
+
+    @MainActor
+    func testControllerCommitPreservesNewerInputTextAndProposals() async throws {
+        let mockModel = MockIntentModel()
+        let engine = IntentEngine(model: mockModel)
+
+        let newProposal = IntentProposal(
+            id: UUID(),
+            intentID: "reminder.new",
+            inputRevision: 2,
+            contextRevision: 1,
+            arguments: IntentArguments()
+        )
+
+        await engine.register(IntentDefinition(
+            intentID: "reminder.create",
+            summary: "Create reminder",
+            parameterDescriptors: [],
+            commit: { _, _ in
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        ))
+
+        let controller = IntentController(engine: engine)
+        let oldProposal = IntentProposal(intentID: "reminder.create", inputRevision: 1, contextRevision: 1, arguments: IntentArguments())
+
+        await engine.previewStore.updateProposals([oldProposal], inputRevision: 1, contextRevision: 1)
+
+        controller.inputText = "Old Command"
+        // Simulate controller state having oldProposal and newProposal
+        Task { @MainActor in
+            // User types new text while commit is running
+            try? await Task.sleep(for: .milliseconds(20))
+            controller.inputText = "New Command"
+        }
+
+        try await controller.commit()
+
+        // Verify that inputText was NOT cleared back to "" since user edited it during commit
+        XCTAssertEqual(controller.inputText, "New Command")
+    }
+
+    func testJSONNullParametersAreIgnoredAndDecodeAsNil() throws {
+        let adapter = AppleFoundationModelAdapter()
+        let jsonResponse = """
+        {
+          "intents": [
+            {
+              "intentID": "reminder.create",
+              "parameters": {
+                "title": "Buy milk",
+                "dueDateExpression": null
+              }
+            }
+          ]
+        }
+        """
+
+        let context = IntentContext(revision: 1)
+        let proposals = adapter.parseResponse(jsonResponse, context: context)
+
+        XCTAssertEqual(proposals.count, 1)
+        let proposal = proposals[0]
+        XCTAssertEqual(proposal.arguments.string(for: "title"), "Buy milk")
+        XCTAssertNil(proposal.arguments.string(for: "dueDateExpression"))
+
+        let decoded = try proposal.arguments.decode(SampleOptionalParams.self)
+        XCTAssertEqual(decoded.title, "Buy milk")
+        XCTAssertNil(decoded.dueDateExpression)
     }
 
     func testJSONBooleanParsingAndTypedDecoding() throws {

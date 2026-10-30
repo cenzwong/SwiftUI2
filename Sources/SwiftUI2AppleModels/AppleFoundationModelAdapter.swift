@@ -25,10 +25,16 @@ public final class AppleFoundationModelAdapter: IntentModel, @unchecked Sendable
         #if canImport(FoundationModels)
         if #available(iOS 18.2, macOS 15.2, visionOS 2.2, *) {
             let prompt = schemaBuilder.buildPrompt(input: input, context: context, descriptors: descriptors)
+            let generationSchema = try? schemaBuilder.buildGenerationSchema(descriptors: descriptors)
 
             return try await sessionManager.executeRequest(revision: context.revision) {
                 let session = LanguageModelSession()
-                let response = try await session.respond(to: prompt)
+                let response: LanguageModelSession.Response
+                if let schema = generationSchema {
+                    response = try await session.respond(to: prompt, schema: schema)
+                } else {
+                    response = try await session.respond(to: prompt)
+                }
 
                 // Parse generated response into intent proposals
                 return self.parseResponse(response.text, context: context)
@@ -56,6 +62,10 @@ public final class AppleFoundationModelAdapter: IntentModel, @unchecked Sendable
             var args = IntentArguments()
             if let params = item["parameters"] as? [String: Any] {
                 for (k, v) in params {
+                    // Skip JSON null values (NSNull) so optional parameters remain absent/nil rather than stringifying as "<null>"
+                    if v is NSNull {
+                        continue
+                    }
                     // Use CFBoolean check alone to distinguish true JSON booleans from NSNumbers representing 0 and 1
                     if let number = v as? NSNumber, CFBooleanGetTypeID() == CFGetTypeID(number) {
                         args[k] = number.boolValue ? "true" : "false"
